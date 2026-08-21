@@ -1,0 +1,69 @@
+# Topics from /home/x/workspace/docker_file/stairs_gamma/metadata.yaml
+lidar_topic: /livox/lidar
+imu_topic: /livox/imu
+
+# Sensor Mode
+sensor_type: LIO                 ## LO: lidar only, LIO: lidar + imu, KILO: lidar + kinematics + imu
+
+# Initialization (require a stationary state at the beginning)
+gravity: 9.81
+init_type: 2                     ## 1: Identity; 2: GravityAlignment
+
+# Extrinsic: rigid body transform from LiDAR frame to IMU frame (T_I_L)
+# LiDAR coordinate system expressed in the IMU coordinate system
+extrinsic_T: [0.049258, -0.012500, 0.026946]
+extrinsic_R: [ 0.999620,  0.027463,  0.002445,
+              -0.027517,  0.999299,  0.025398,
+              -0.001746, -0.025456,  0.999674]
+
+# Lidar Common
+lidar_type: 5                    ## Velodyne: 1, Ouster: 2, Pandar: 3, KITTI: 4, Livox: 5
+livox_driver_version: 1          ## ROS2 CustomMsg package: 1=livox_ros_driver, 2=livox_ros_driver2
+time_scale: 1e-9                 ## Livox offset_time is in nanoseconds
+min_range: 1.0                   ## minimum valid range [m]
+max_range: 150.0                 ## maximum valid range [m]
+filter_num: 4                    ## match point_filter_num in the supplied calibration config
+voxel_grid_resolution: 0.5       ## point-cloud downsampling resolution [m]
+voxel_grid_mode: 1               ## 0: median representative; 1: random per-voxel quota
+voxel_grid_target_num: 3000
+voxel_grid_overshoot: 1.5
+
+# Voxel Map
+ndt_enable: true
+p2plane_enable: true
+voxel_size: 0.5
+beam_err: 0.1
+dept_err: 0.04
+voxel_max_num: 50
+planar_ratio: 0.1
+planar_thickness: 0.1
+nearby_type: 0                   ## 0: center voxel; 1: nearby 7; 2: nearby 27
+capacity: 300000
+ndt_min_points: 5
+
+# Backend
+kf_trans_threshold: 0.3
+kf_degree_threshold: 10.0
+kf_max_num_submap: 20
+kf_max_dist_submap: 5.0
+
+# Loop closure
+loop_closure_enable: true
+loop_search_radius: 10.0
+loop_min_id_separation: 50
+loop_icp_max_corr_dist: 4.0
+loop_icp_max_iterations: 20
+loop_icp_fitness_threshold: 0.7
+loop_verify_max_attempts: 1
+loop_kiss_matcher_enabled: false
+loop_kiss_refine_min_id_gap: 100
+loop_kiss_inliers_threshold: 40
+loop_kiss_use_quatro: true
+
+# ESKF covariance/noise
+enable_second_step_eskf: true
+ieskf_max_iterations: 3
+imu_acc_meas_noise: 0.1
+imu_gyr_meas_noise: 0.01
+p2plane_kernel_threshold: 3.0
+ndt_kernel_threshold: 5.0
