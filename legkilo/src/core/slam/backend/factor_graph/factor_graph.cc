@@ -7,6 +7,11 @@
 
 #include "common/yaml_helper.hpp"
 
+
+//ceres输出相关
+#include <fstream>
+#include <iomanip>//设置浮点数输出精度
+
 namespace legkilo {
 
 namespace {
@@ -27,9 +32,13 @@ Eigen::Matrix<double, 6, 6> MakeSqrtInformation(double trans_sigma, double rot_s
 
 FactorGraph::FactorGraph(const std::string &yaml_file) : problem_(std::make_unique<ceres::Problem>()) {
     YamlHelper yaml(yaml_file);
-    max_iterations_ = yaml.get<size_t>("factor_graph_max_iterations", 100);
-    odom_near_trans_sigma_ = yaml.get<double>("odom_near_trans_sigma", 0.1);
-    odom_near_rot_sigma_deg_ = yaml.get<double>("odom_near_rot_sigma_deg", 5.0);
+
+    const std::string result_folder = yaml.get<std::string>("temp_result_save_folder", "temp");
+    g2o_output_path_ = std::string(ROOT_DIR) + "result/" + result_folder + "/factor_graph.g2o";
+
+    max_iterations_ = yaml.get<size_t>("factor_graph_max_iterations", 100);//最大迭代次数
+    odom_near_trans_sigma_ = yaml.get<double>("odom_near_trans_sigma", 0.1);//相邻子地图之间的平移测量，典型误差大约在 10 cm 这个量级。
+    odom_near_rot_sigma_deg_ = yaml.get<double>("odom_near_rot_sigma_deg", 5.0);//相邻子地图之间的旋转测量，典型误差大约在 5° 这个量级。
     odom_next_trans_sigma_multiplier_ = yaml.get<double>("odom_next_trans_sigma_multiplier", 2.0);
     odom_next_rot_sigma_multiplier_ = yaml.get<double>("odom_next_rot_sigma_multiplier", 2.0);
     loopclosure_trans_sigma_multiplier_ = yaml.get<double>("loopclosure_trans_sigma_multiplier", 10.0);
@@ -84,6 +93,9 @@ void FactorGraph::addRelativeEdge(NodeType i, NodeType j, const Eigen::Isometry3
     if (it_i == poses_.end() || it_j == poses_.end()) return;
 
     const Eigen::Matrix<double, 6, 6> sqrt_information = MakeSqrtInformation(trans_sigma, rot_sigma_deg);
+
+    edges_.push_back({i, j, meas, sqrt_information});//将边存储起来
+
     ceres::CostFunction *cost = graph::RelativePoseFactor::Create(meas, sqrt_information);//
     problem_->AddResidualBlock(cost, loss_function, it_i->second.t, it_i->second.q, it_j->second.t, it_j->second.q);
 }
@@ -126,6 +138,59 @@ void FactorGraph::optimize() {
     ceres::Solve(options, problem_.get(), &summary);
     LOG(INFO) << "FactorGraph optimization done. Iterations: " << summary.iterations.size()
               << ", final cost: " << summary.final_cost;
+
+    saveG2o(g2o_output_path_);//将优化后的因子图保存为 g2o 文件
+}
+
+
+bool FactorGraph::saveG2o(const std::string &file_path) const {
+    std::ofstream out(file_path, std::ios::out | std::ios::trunc);
+    if (!out.is_open()) {
+        LOG(ERROR) << "Failed to open file: " << file_path;
+        return false;
+    }
+
+    out <<std::setprecision(17);
+
+
+    // Save nodes
+    for (const auto & [id, pose] : poses_) {
+
+        const Eigen::Vector3d t = pose.tEigen();
+        const Eigen::Quaterniond q = pose.qEigen().normalized();
+
+
+
+        out<< "VERTEX_SE3:QUAT " << id << " " << t.x() << " " << t.y() << " " << t.z() << " "
+            << q.x() << " " << q.y() << " " << q.z() << " " << q.w() << std::endl;
+    }
+
+    // Save edges
+    for (const auto &edge : edges_) {
+        const Eigen::Vector3d t = edge.meas.translation();
+        const Eigen::Quaterniond q = Eigen::Quaterniond(edge.meas.rotation()).normalized(); // Ensure the quaternion is normalized
+
+        out << "EDGE_SE3:QUAT " << edge.i << " " << edge.j << " "<< t.x() << " " << t.y() << " " << t.z() << " "
+            << q.x() << " " << q.y() << " " << q.z() << " " << q.w() ;
+
+        for (int row = 0; row < 6; ++row) {
+            for (int col = row; col < 6; ++col) {
+                out << " " << edge.sqrt_information(row, col);
+            }
+        }
+        out << std::endl;
+    }
+
+    out.flush();
+
+    if (!out.good())        
+    {
+       LOG(ERROR) << "Failed to write to file: " << file_path;
+       return false;
+    }
+    
+
+    return true;
 }
 
 }  // namespace legkilo

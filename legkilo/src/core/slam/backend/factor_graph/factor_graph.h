@@ -37,7 +37,17 @@ class FactorGraph {
 
     bool getPose(NodeType node_id, Eigen::Isometry3d& pose) const;
 
+    bool saveG2o(const std::string& file_path) const;
+
    private:
+
+   struct StoreEdge {
+        EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+        NodeType i;
+        NodeType j;
+        Eigen::Isometry3d meas;
+        Eigen::Matrix<double, 6, 6> sqrt_information;
+   };
     void addRelativeEdge(NodeType i, NodeType j, const Eigen::Isometry3d& meas, double trans_sigma,
                          double rot_sigma_deg, ceres::LossFunction* loss_function = nullptr);
 
@@ -61,6 +71,10 @@ class FactorGraph {
     double loopclosure_rot_sigma_multiplier_ = 4.0;
     double loopclosure_loss_scale_ = 3.0;
     ceres::LinearSolverType linear_solver_type_ = ceres::SPARSE_NORMAL_CHOLESKY;
+
+    std::string g2o_output_path_;
+    std::vector<StoreEdge> edges_;
+
 };
 
 }  // namespace legkilo
