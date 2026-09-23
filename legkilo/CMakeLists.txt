@@ -131,6 +131,7 @@ set(CORE_SOURCES
     src/core/slam/frontend/KILO.cc
     src/core/slam/frontend/eskf.cc
     src/core/slam/frontend/gaussian_voxel_map.cc
+    src/core/slam/frontend/intensity_model.cc
 
     # backend
     src/core/slam/backend/backend.cc
@@ -239,5 +240,6 @@ if(LEGKILO_RESOLVED_ROS_VERSION STREQUAL "2")
 endif()
 
 if(LEGKILO_BUILD_TESTS)
+  enable_testing()
   add_subdirectory(test)
 endif()

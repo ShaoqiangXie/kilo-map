@@ -102,6 +102,12 @@ ros2 bag play ./slope_ros2
 5. **`extrinsic_T`** / **`extrinsic_R`**：IMU 到激光雷达的外参变换（平移向量与旋转矩阵）。
 6. 建图最好从静止状态开始，以便系统初始化 IMU 偏置与初始位姿。将 `init_type` 设置为 `2` 可启用重力方向对齐初始化。
 
+## 强度辅助抗退化
+
+前端可通过 `intensity_enable: true` 融合局部平面切向强度残差。启用示例为
+`legkilo/config/mid360_intensity.yaml`；默认关闭。实现原理、参数、编译运行命令与合成测试结果见
+[激光强度残差实现与测试报告](doc/INTENSITY_RESIDUAL_CN.md)。目前尚未验证实采轨迹精度收益。
+
 # Save Map
 <p align="center">
   <img src="./doc/fig/save.png" alt="Image 2" width="42%" />

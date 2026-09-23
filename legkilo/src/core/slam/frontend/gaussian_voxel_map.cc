@@ -151,6 +151,7 @@ void Plane::fit() {
 // 【为什么静态】所有 Plane 实例共用同一组阈值；在建图开始前一次性初始化即可。
 // --------------------------------------------------------------------------
 GaussianVoxelMap::GaussianVoxelMap(const Config& config) : config_(config) {
+    config_.intensity.validate();
     voxel_size_ = config_.voxel_size;
     inv_voxel_size_ = 1.0 / voxel_size_;
     Plane::kMaxPointsNum = config_.voxel_max_num;
@@ -266,12 +267,26 @@ void GaussianVoxelMap::insertPoints(const GaussCloud& cloud) {
 
         VoxelPtr& voxel_ptr = list_it->second;
         // ---- P2P 通道：把点喂进 plane 累加器，一次性 update() ----
-        if (config_.p2p_enable) {
+        if (config_.p2p_enable || config_.intensity.enable) {
             for (size_t i = begin; i < end; ++i) {
                 const auto& point = cloud[voxel_entries[i].second];
                 voxel_ptr->plane.addPoint(point.pt, point.cov);
             }
             voxel_ptr->plane.update();
+        }
+
+        if (config_.intensity.enable) {
+            for (size_t i = begin; i < end; ++i) {
+                const auto& point = cloud[voxel_entries[i].second];
+                double normalized = 0.0;
+                if (!config_.intensity.normalize(point.intensity, normalized)) continue;
+                if (!voxel_ptr->intensity_model) voxel_ptr->intensity_model = std::make_unique<IntensityModel>();
+                voxel_ptr->intensity_model->addPoint(point.pt, normalized, config_.intensity.max_points);
+            }
+            if (voxel_ptr->intensity_model) {
+                voxel_ptr->intensity_model->fit(voxel_ptr->plane.valid ? voxel_ptr->plane.normal
+                                                                     : Eigen::Vector3d::Zero(), config_.intensity);
+            }
         }
 
         // ---- NDT 通道：懒创建 SubGrid，喂到对应的 SubVoxel ----
@@ -385,6 +400,57 @@ bool GaussianVoxelMap::buildPoint2PlaneResidual(const KNearestInput& knn_input, 
     }
 
     return knn_res.valid;
+}
+
+// Local tangent intensity: h = mean_I + g^T (R p_body + t - mean_p).
+// The filter uses innovation measured_I - h and prediction Jacobian dh/d(delta).
+// Covariance and association are held fixed within each linearization.
+bool GaussianVoxelMap::buildIntensityResidual(const KNearestInput& input, KNearestRes<1>& result) const {
+    result = KNearestRes<1>{};
+    const auto& cfg = config_.intensity;
+    double measured = 0.0;
+    if (!cfg.enable || !cfg.normalize(input.intensity, measured)) return false;
+    const auto& p = *input.point_world;
+    if (!p.allFinite() || !input.point_body->allFinite() || !input.point_cov_body->allFinite() ||
+        !input.rot_predict->allFinite()) return false;
+    const auto key = voxelKeyFastFloor(p, inv_voxel_size_);
+    const IntensityModel* best = nullptr;
+    double best_distance = std::numeric_limits<double>::infinity();
+    for (const auto& offset : nearby_grids_) {
+        const auto it = voxel_map_.find(encodeKey(key + offset));
+        if (it == voxel_map_.end()) continue;
+        const auto& voxel = *it->second->second;
+        if (!voxel.plane.valid || !voxel.intensity_model || !voxel.intensity_model->valid()) continue;
+        const auto& model = *voxel.intensity_model;
+        if (std::abs(voxel.plane.normal.dot(p - voxel.plane.center)) > cfg.max_normal_distance) continue;
+        const double support = model.supportDistance2(p);
+        const double distance = (p - model.center()).squaredNorm();
+        if (!std::isfinite(support) || support > cfg.max_mahalanobis * cfg.max_mahalanobis ||
+            distance > voxel_size_ * voxel_size_) continue;
+        // Select using geometry only, never search for a convenient intensity match.
+        if (distance < best_distance) {
+            best = &model;
+            best_distance = distance;
+        }
+    }
+    if (!best) return false;
+    const Eigen::RowVector3d g = best->gradient().transpose();
+    const Eigen::RowVector3d g_body = g * *input.rot_predict;
+    const double point_variance = (g_body * *input.point_cov_body * g_body.transpose())(0, 0);
+    const double measurement_variance = cfg.measurement_sigma * cfg.measurement_sigma;
+    const double variance = measurement_variance + best->predictionVariance(p, measurement_variance) +
+                            std::max(0.0, point_variance);
+    if (!std::isfinite(variance) || variance <= 0.0) return false;
+    const double inv_std = 1.0 / std::sqrt(variance);
+    const double innovation = (measured - best->predict(p)) * inv_std;
+    if (!std::isfinite(innovation) || std::abs(innovation) > cfg.residual_gate) return false;
+    result.r(0) = innovation;
+    result.J.leftCols<3>() = -g_body * SKEW_SYM_MATRIX(*input.point_body) * inv_std;
+    result.J.rightCols<3>() = g * inv_std;
+    result.R(0, 0) = std::max(1.0, std::abs(innovation) / cfg.huber_delta) / cfg.weight;
+    result.score = -best_distance;
+    result.valid = result.J.allFinite() && result.R.allFinite();
+    return result.valid;
 }
 
 // --------------------------------------------------------------------------

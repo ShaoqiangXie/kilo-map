@@ -58,6 +58,11 @@ struct FrameDiagnosticStats {
     size_t ndt_first = 0;
     size_t p2p_second = 0;
     size_t ndt_second = 0;
+    size_t intensity_count = 0;
+    double intensity_residual_median = std::numeric_limits<double>::quiet_NaN();
+    double intensity_residual_p95 = std::numeric_limits<double>::quiet_NaN();
+    double intensity_weight_mean = std::numeric_limits<double>::quiet_NaN();
+    double geometry_information_min_eigenvalue = std::numeric_limits<double>::quiet_NaN();
     bool second_step_executed = false;
     const char* lidar_diagnostic_stage = "none";
     double p2p_residual_median = std::numeric_limits<double>::quiet_NaN();
@@ -188,6 +193,10 @@ void printFrameEnd(const FrameDiagnosticStats& stats, const State& state, bool h
     addDiagnosticItem(table, "ndt_first", "size_t", stats.ndt_first);
     addDiagnosticItem(table, "p2p_second", "size_t", stats.p2p_second);
     addDiagnosticItem(table, "ndt_second", "size_t", stats.ndt_second);
+    addDiagnosticItem(table, "intensity_count", "size_t", stats.intensity_count);
+    addDiagnosticItem(table, "intensity_residual_p95", "normalized", stats.intensity_residual_p95);
+    addDiagnosticItem(table, "geometry_information_min_eigenvalue", "H^T R^-1 H",
+                      stats.geometry_information_min_eigenvalue);
     addDiagnosticItem(table, "match_ratio", "ratio", formatScalar(match_ratio, 6));
     addDiagnosticItem(table, "lidar_diagnostic_stage", "string", stats.lidar_diagnostic_stage);
     addDiagnosticItem(table, "p2p_residual_median", "normalized", formatScalar(stats.p2p_residual_median, 6));
@@ -228,7 +237,8 @@ bool writeFrameDiagnosticCsv(std::ofstream& stream, const std::string& path, con
                   "p2p_nonfinite_count,ndt_residual_median,ndt_residual_p95,ndt_weight_mean,ndt_nonfinite_count,"
                   "information_min_eigenvalue,ieskf_iterations_used,ieskf_converged,pos_x,pos_y,pos_z,roll_deg,"
                   "pitch_deg,yaw_deg,vel_x,vel_y,vel_z,ba_x,ba_y,ba_z,bw_x,bw_y,bw_z,gravity_norm,"
-                  "frame_delta_translation,frame_delta_rotation_deg\n";
+                  "frame_delta_translation,frame_delta_rotation_deg,intensity_count,intensity_residual_median,"
+                  "intensity_residual_p95,intensity_weight_mean,geometry_information_min_eigenvalue\n";
         LOG(INFO) << "Frontend diagnostic CSV: " << path;
     }
 
@@ -259,7 +269,12 @@ bool writeFrameDiagnosticCsv(std::ofstream& stream, const std::string& path, con
            << ',' << state.vel_.x() << ',' << state.vel_.y() << ',' << state.vel_.z() << ',' << state.ba_.x() << ','
            << state.ba_.y() << ',' << state.ba_.z() << ',' << state.bw_.x() << ',' << state.bw_.y() << ','
            << state.bw_.z() << ',' << state.grav_.norm() << ',' << frame_delta_translation << ','
-           << frame_delta_rotation << '\n';
+           << frame_delta_rotation << ',' << stats.intensity_count;
+    appendOptionalDouble(stream, stats.intensity_residual_median);
+    appendOptionalDouble(stream, stats.intensity_residual_p95);
+    appendOptionalDouble(stream, stats.intensity_weight_mean);
+    appendOptionalDouble(stream, stats.geometry_information_min_eigenvalue);
+    stream << '\n';
     stream.flush();
     if (!stream.good()) {
         LOG(ERROR) << "Failed to write frontend diagnostic CSV: " << path;
@@ -382,6 +397,28 @@ void KILO::initializeFromYaml(const std::string& config_file) {
     voxel_map_config.ndt_eigenvalue_regularization = yaml_helper.get<bool>("ndt_eigenvalue_regularization", true);
     voxel_map_config.ndt_min_eigenvalue = yaml_helper.get<double>("ndt_min_eigenvalue", 1e-6);
     voxel_map_config.ndt_max_condition = yaml_helper.get<double>("ndt_max_condition", 1000.0);
+    auto& intensity = voxel_map_config.intensity;
+    intensity.enable = yaml_helper.get<bool>("intensity_enable", false);
+    intensity_enable_ = intensity.enable;
+    if (intensity.enable) {
+        intensity.scale = yaml_helper.get<double>("intensity_scale", intensity.scale);
+        intensity.min_points = yaml_helper.get<size_t>("intensity_min_points", intensity.min_points);
+        intensity.max_points = yaml_helper.get<size_t>("intensity_max_points", intensity.max_points);
+        intensity.min_spatial_eigenvalue = yaml_helper.get<double>("intensity_min_spatial_eigenvalue", intensity.min_spatial_eigenvalue);
+        intensity.min_gradient = yaml_helper.get<double>("intensity_min_gradient", intensity.min_gradient);
+        intensity.max_gradient = yaml_helper.get<double>("intensity_max_gradient", intensity.max_gradient);
+        intensity.max_fit_rmse = yaml_helper.get<double>("intensity_max_fit_rmse", intensity.max_fit_rmse);
+        intensity.min_fit_r2 = yaml_helper.get<double>("intensity_min_fit_r2", intensity.min_fit_r2);
+        intensity.measurement_sigma = yaml_helper.get<double>("intensity_measurement_sigma", intensity.measurement_sigma);
+        intensity.max_normal_distance = yaml_helper.get<double>("intensity_max_normal_distance", intensity.max_normal_distance);
+        intensity.max_mahalanobis = yaml_helper.get<double>("intensity_max_mahalanobis", intensity.max_mahalanobis);
+        intensity.residual_gate = yaml_helper.get<double>("intensity_residual_gate", intensity.residual_gate);
+        intensity.weight = yaml_helper.get<double>("intensity_weight", intensity.weight);
+        intensity.huber_delta = yaml_helper.get<double>("intensity_huber_delta", intensity.huber_delta);
+        if (two_step_lidar_eskf_ && ieskf_max_iterations_ < 1) {
+            throw std::invalid_argument("intensity_enable requires ieskf_max_iterations >= 1 in two-step mode");
+        }
+    }
     gaussian_voxel_map_ = std::make_unique<GaussianVoxelMap>(voxel_map_config);
 
     // Extrinsic
@@ -425,6 +462,7 @@ GaussCloudPtr KILO::initializeMap(const CloudPtr& cloud_lidar) {
         VoxelMapUtils::calculatePointMeasureCov(pt_lidar, cov_lidar);  // 激光系测量协方差
 
         gauss_cloud_ptr->at(i).pt = pt_world;
+        gauss_cloud_ptr->at(i).intensity = cloud_lidar->points[i].intensity;
         // 机体系点协方差 = R_bl · cov_lidar · R_bl^T (只有旋转外参)
         // 再由 computeWorldPointCov 传播到世界系并叠加位姿不确定性
         gauss_cloud_ptr->at(i).cov =
@@ -485,6 +523,7 @@ void KILO::backpropagate(const GaussCloud& cloud_world, GaussCloud& cloud_body) 
 
         // 世界系 → 机体系：p_b = R^T · (p_w - t)
         gs_body.pt.noalias() = rotT * (gs_world.pt - pos);
+        gs_body.intensity = gs_world.intensity;
         // 用新的机体系坐标重新计算测量噪声协方差（等价于把点当作从激光系刚测出来的）
         VoxelMapUtils::calculatePointMeasureCov(gs_body.pt, gs_body.cov);
     }
@@ -586,6 +625,31 @@ bool KILO::eskfPredict(double current_time) {
 //   [3] 若有有效残差，组装 (z, H, R)，调用 ESKF::updateByPoints 完成一次 Kalman step
 //   [4] 用更新后的位姿重算世界系点云与协方差（供后续步骤/可视化）
 // --------------------------------------------------------------------------
+void KILO::appendIntensityObservations(const std::vector<KNearestRes<1>>& results, ObsShared& obs,
+                                       LidarUpdateDiagnostics& diagnostics, bool collect_diagnostics) const {
+    const size_t count = std::count_if(results.begin(), results.end(),
+                                      [](const KNearestRes<1>& res) { return res.valid; });
+    if (count == 0) return;
+    size_t row = obs.pt_z.size();
+    obs.pt_h.conservativeResize(row + count, 6);
+    obs.pt_R.conservativeResize(row + count);
+    obs.pt_z.conservativeResize(row + count);
+    diagnostics.intensity_count = count;
+    for (const auto& res : results) {
+        if (!res.valid) continue;
+        obs.pt_h.row(row) = res.J;
+        obs.pt_z(row) = res.r(0);
+        obs.pt_R(row) = res.R(0, 0);
+        if (collect_diagnostics) {
+            diagnostics.intensity_residuals.push_back(std::abs(res.r(0)));
+            const double weight = 1.0 / res.R(0, 0);
+            diagnostics.intensity_weight_sum += weight;
+            diagnostics.intensity_information.noalias() += weight * res.J.transpose() * res.J;
+        }
+        ++row;
+    }
+}
+
 KILO::LidarUpdateDiagnostics KILO::predictUpdatePoint(const double current_time, const size_t idx_i,
                                                       const size_t idx_j, const CloudPtr& cloud_lidar_pcl,
                                                       GaussCloud& cloud_body, GaussCloud& cloud_world,
@@ -601,6 +665,9 @@ KILO::LidarUpdateDiagnostics KILO::predictUpdatePoint(const double current_time,
     size_t points_size = idx_j - idx_i;
     std::vector<KNearestRes<1>> p2p_results;   // 每点 1 维（点到平面的有符号距离）
     std::vector<KNearestRes<3>> ndt_results;   // 每点 3 维（NDT 白化后的位移残差）
+    std::vector<KNearestRes<1>> intensity_results;
+    const bool use_intensity = intensity_enable_ && !two_step_lidar_eskf_;
+    if (use_intensity) intensity_results.reserve(points_size);
     p2p_results.reserve(points_size);
     if (ndt_enable_) ndt_results.reserve(points_size);
 
@@ -611,6 +678,8 @@ KILO::LidarUpdateDiagnostics KILO::predictUpdatePoint(const double current_time,
         // [2.1] 计算点在机体系 / 世界系下的均值与协方差
         GaussPoint& gs_body = cloud_body[cur_idx];
         GaussPoint& gs_world = cloud_world[cur_idx];
+        gs_body.intensity = cloud_lidar_pcl->points[cur_idx].intensity;
+        gs_world.intensity = gs_body.intensity;
 
         Mat3D pt_lidar_cov;
         VoxelMapUtils::calculatePointMeasureCov(pt_lidar, pt_lidar_cov);   // 激光系测量协方差
@@ -621,11 +690,12 @@ KILO::LidarUpdateDiagnostics KILO::predictUpdatePoint(const double current_time,
         gs_world.cov = computeWorldPointCov(gs_body.pt, gs_body.cov, rot_predict, rot_cov_predict, pos_cov_predict);
 
         // [2.2] 在高斯体素地图中查邻居并构建残差
-        KNearestInput knn_input(&gs_body.pt, &gs_body.cov, &gs_world.pt, &gs_world.cov, &rot_predict);
+        KNearestInput knn_input(&gs_body.pt, &gs_body.cov, &gs_world.pt, &gs_world.cov, &rot_predict, gs_body.intensity);
         KNearestRes<1> p2p_result;
         if (p2p_enable_) { gaussian_voxel_map_->buildPoint2PlaneResidual(knn_input, p2p_result, kFirstStepLidarNoise); }
 
         // [2.3] 优先 P2P；P2P 失败并且启用 NDT 则尝试 NDT
+        bool geometry_matched = p2p_result.valid;
         if (p2p_result.valid) {
             p2p_results.push_back(p2p_result);
             if (match_types && cur_idx < match_types->size()) { (*match_types)[cur_idx] = LidarMatchType::Point2Plane; }
@@ -633,8 +703,15 @@ KILO::LidarUpdateDiagnostics KILO::predictUpdatePoint(const double current_time,
             KNearestRes<3> ndt_result;
             gaussian_voxel_map_->buildNdtResidual(knn_input, ndt_result, kFirstStepLidarNoise);
             if (ndt_result.valid) {
+                geometry_matched = true;
                 ndt_results.push_back(ndt_result);
                 if (match_types && cur_idx < match_types->size()) { (*match_types)[cur_idx] = LidarMatchType::Ndt; }
+            }
+        }
+        if (use_intensity && geometry_matched) {
+            KNearestRes<1> intensity_result;
+            if (gaussian_voxel_map_->buildIntensityResidual(knn_input, intensity_result)) {
+                intensity_results.push_back(intensity_result);
             }
         }
     }
@@ -709,6 +786,7 @@ KILO::LidarUpdateDiagnostics KILO::predictUpdatePoint(const double current_time,
         }
 
         // [4] 一次 ESKF 更新（非迭代，因为 Stage-1 追求速度而非精度）
+        appendIntensityObservations(intensity_results, obs_shared, diagnostics, collect_diagnostics);
         eskf_->updateByPoints(obs_shared);
         last_state_update_time_ = current_time;
 
@@ -778,16 +856,21 @@ KILO::LidarUpdateDiagnostics KILO::predictUpdateCloud(const GaussCloud& cloud_bo
         std::vector<KNearestRes<1>> p2p_results(N);
         std::vector<KNearestRes<3>> ndt_results;
         if (ndt_enable_) ndt_results.resize(N);
+        std::vector<KNearestRes<1>> intensity_results;
+        if (intensity_enable_) intensity_results.resize(N);
 
         const auto process_func = [&](size_t i) {
             KNearestInput knn_input(&cloud_body[i].pt, &cloud_body[i].cov, &cloud_world[i].pt, &cloud_world[i].cov,
-                                    &R_cur);
+                                    &R_cur, cloud_body[i].intensity);
             if (p2p_enable_) {
                 gaussian_voxel_map_->buildPoint2PlaneResidual(knn_input, p2p_results[i], kSecondStepLidarNoise);
             }
             // 若 P2P 未启用 或 P2P 匹配失败，回退尝试 NDT
             if ((!p2p_enable_ || p2p_results[i].valid == false) && ndt_enable_) {
                 gaussian_voxel_map_->buildNdtResidual(knn_input, ndt_results[i], kSecondStepLidarNoise);
+            }
+            if (intensity_enable_ && (p2p_results[i].valid || (ndt_enable_ && ndt_results[i].valid))) {
+                gaussian_voxel_map_->buildIntensityResidual(knn_input, intensity_results[i]);
             }
         };
 
@@ -876,6 +959,7 @@ KILO::LidarUpdateDiagnostics KILO::predictUpdateCloud(const GaussCloud& cloud_bo
             }
 
             // [4] 一步 IESKF 修正（首次等价 EKF，之后带先验校正项）；返回是否收敛
+            appendIntensityObservations(intensity_results, obs_shared, diagnostics, collect_diagnostics);
             converge = eskf_->updateByCloud(obs_shared, state_before_iter, ieskf_max_iterations_, iteration);
             diagnostics.ieskf_converged = converge;
             if (converge) break;    // 提前收敛就跳出，节约时间
@@ -1209,7 +1293,15 @@ ProcessResult KILO::process(common::MeasGroup& measure) {
     diagnostic.ndt_residual_p95 = ndt_summary.p95;
     diagnostic.ndt_weight_mean = ndt_summary.weight_mean;
     diagnostic.ndt_nonfinite_count = final_diagnostics.ndt_nonfinite_count;
-    diagnostic.information_min_eigenvalue = informationMinEigenvalue(final_diagnostics.information);
+    diagnostic.intensity_count = final_diagnostics.intensity_count;
+    const auto intensity_summary = summarizeResiduals(final_diagnostics.intensity_residuals,
+                                                       final_diagnostics.intensity_weight_sum);
+    diagnostic.intensity_residual_median = intensity_summary.median;
+    diagnostic.intensity_residual_p95 = intensity_summary.p95;
+    diagnostic.intensity_weight_mean = intensity_summary.weight_mean;
+    diagnostic.geometry_information_min_eigenvalue = informationMinEigenvalue(final_diagnostics.information);
+    diagnostic.information_min_eigenvalue =
+        informationMinEigenvalue(final_diagnostics.information + final_diagnostics.intensity_information);
     diagnostic.ieskf_iterations_used = final_diagnostics.ieskf_iterations_used;
     diagnostic.ieskf_converged = final_diagnostics.ieskf_converged;
 
@@ -1234,6 +1326,7 @@ ProcessResult KILO::process(common::MeasGroup& measure) {
     result.down_pts_size = cloud_down_lidar->size();
     result.p2p_count = p2p_total;
     result.ndt_count = ndt_total;
+    result.intensity_count = final_diagnostics.intensity_count;
     result.success_pts_size = p2p_total + ndt_total;
     result.cloud_world = cloud_down_world;
     result.cloud_lidar = cloud_down_lidar;

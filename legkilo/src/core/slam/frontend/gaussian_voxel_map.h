@@ -49,6 +49,7 @@
 #include "common/math_utils.hpp"
 #include "common/pcl_types.h"
 #include "core/slam/frontend/voxel_map_utils.hpp"
+#include "core/slam/frontend/intensity_model.h"
 
 namespace legkilo {
 // 体素键：把 3D 整数索引 (ix, iy, iz) 编码进一个 int64（各占 21 位，有偏移），详见 math_utils.hpp
@@ -216,6 +217,7 @@ struct Voxel {
     ~Voxel() = default;
 
     Plane plane;
+    std::unique_ptr<IntensityModel> intensity_model;  // allocated only when intensity is enabled and available
     std::unique_ptr<SubGrid> subgrid;  // 懒创建：只有启用 NDT 且落进点时才分配
 
     // 便捷入口：懒创建 SubGrid 后追加一个点
@@ -240,17 +242,19 @@ using VoxelPtr = std::shared_ptr<Voxel>;
 struct KNearestInput {
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     KNearestInput(const Eigen::Vector3d* p_body, const Eigen::Matrix3d* p_cov_body, const Eigen::Vector3d* p_world,
-                  const Eigen::Matrix3d* p_cov_world, const Eigen::Matrix3d* rot)
+                  const Eigen::Matrix3d* p_cov_world, const Eigen::Matrix3d* rot,
+                  double raw_intensity = std::numeric_limits<double>::quiet_NaN())
         : point_body(p_body),
           point_cov_body(p_cov_body),
           point_world(p_world),
           point_cov_world(p_cov_world),
-          rot_predict(rot) {}
+          rot_predict(rot), intensity(raw_intensity) {}
     const Eigen::Vector3d* point_body = nullptr;
     const Eigen::Matrix3d* point_cov_body = nullptr;
     const Eigen::Vector3d* point_world = nullptr;
     const Eigen::Matrix3d* point_cov_world = nullptr;
     const Eigen::Matrix3d* rot_predict = nullptr;
+    double intensity;
 };
 
 // ============================================================
@@ -301,6 +305,7 @@ class GaussianVoxelMap {
         bool ndt_eigenvalue_regularization = true;// 是否做特征值下限正则化
         double ndt_min_eigenvalue = 1e-6;         // 最小特征值下限
         double ndt_max_condition = 100.0;         // 最大条件数（限制 λ_max / λ_min）
+        IntensityConfig intensity;
     };
 
     // ---- 残差构造时使用的测量噪声档位 (Stage-1/2 有不同配置) ----
@@ -322,6 +327,10 @@ class GaussianVoxelMap {
      *   淘汰：voxel_list_.size() > capacity 时，从链表尾丢一个（最久未访问的体素）。
      */
     void insertPoints(const GaussCloud& cloud);
+
+    // r is the innovation (measured - predicted); J differentiates the prediction.
+    // R contains the intensity information multiplier and Huber variance scale.
+    bool buildIntensityResidual(const KNearestInput& input, KNearestRes<1>& result) const;
 
     /**
      * @brief 构造点到平面 (P2P) 残差；遍历 nearby_grids_ 的候选体素，挑选高斯概率最大的平面。

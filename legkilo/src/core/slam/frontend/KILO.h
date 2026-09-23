@@ -56,6 +56,8 @@ class ESKF;
 class StateInitial;
 class VoxelGrid;
 class GaussianVoxelMap;
+struct ObsShared;
+template <int DIM> struct KNearestRes;
 struct GaussPoint;
 using GaussCloud = std::vector<GaussPoint, Eigen::aligned_allocator<GaussPoint>>;
 }  // namespace legkilo
@@ -81,6 +83,7 @@ struct ProcessResult {
     size_t success_pts_size = 0;  // 有效点数（P2P + NDT 块之和）
     size_t p2p_count = 0;         // 有效 P2P 点数
     size_t ndt_count = 0;         // 有效 NDT 观测块数
+    size_t intensity_count = 0;   // additional scalar constraints; not added to success_pts_size
     CloudPtr cloud_world = nullptr;   // 世界系降采样点云
     CloudPtr cloud_body = nullptr;    // 机体系降采样点云
     CloudPtr cloud_lidar = nullptr;   // 激光雷达自身坐标系点云
@@ -149,6 +152,10 @@ class KILO {
     struct LidarUpdateDiagnostics {
         size_t p2p_count = 0;
         size_t ndt_count = 0;
+        size_t intensity_count = 0;
+        std::vector<double> intensity_residuals;
+        double intensity_weight_sum = 0.0;
+        Mat6D intensity_information = Mat6D::Zero();
         std::vector<double> p2p_residuals;
         std::vector<double> ndt_residuals;
         double p2p_weight_sum = 0.0;
@@ -163,6 +170,11 @@ class KILO {
         void merge(const LidarUpdateDiagnostics& other) {
             p2p_count += other.p2p_count;
             ndt_count += other.ndt_count;
+            intensity_count += other.intensity_count;
+            intensity_residuals.insert(intensity_residuals.end(), other.intensity_residuals.begin(),
+                                       other.intensity_residuals.end());
+            intensity_weight_sum += other.intensity_weight_sum;
+            intensity_information += other.intensity_information;
             p2p_residuals.insert(p2p_residuals.end(), other.p2p_residuals.begin(), other.p2p_residuals.end());
             ndt_residuals.insert(ndt_residuals.end(), other.ndt_residuals.begin(), other.ndt_residuals.end());
             p2p_weight_sum += other.p2p_weight_sum;
@@ -175,6 +187,9 @@ class KILO {
 
     // 读取 YAML 并初始化所有子模块（ESKF、地图、降采样、外参、诊断开关等）
     void initializeFromYaml(const std::string& config_file);
+
+    void appendIntensityObservations(const std::vector<KNearestRes<1>>& results, ObsShared& obs,
+                                     LidarUpdateDiagnostics& diagnostics, bool collect_diagnostics) const;
 
     /**
      * @brief  首帧初始化时把降采样点直接注入地图（不做匹配，只贡献先验）。
@@ -249,6 +264,7 @@ class KILO {
     bool two_step_lidar_eskf_ = true;                           // 是否启用 Stage-2 整帧 IESKF
     bool p2p_enable_ = true;                                    // 是否使用点到平面 (P2P) 残差
     bool ndt_enable_ = false;                                   // 是否使用 NDT (分布到分布) 残差
+    bool intensity_enable_ = false;
     bool use_state_covariance_for_lidar_points_ = true;         // 世界系点协方差是否叠加位姿 P
     int ieskf_max_iterations_ = 3;                              // Stage-2 IESKF 最大迭代次数
     double gravity_ = 9.81;                                     // 世界系重力量级 (m/s^2)

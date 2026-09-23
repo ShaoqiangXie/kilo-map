@@ -10,6 +10,7 @@
 #include <pcl/pcl_config.h>
 #if PCL_VERSION_COMPARE(>=, 1, 11, 0)
 #include <memory>
+#include <limits>
 #else
 #include <boost/make_shared.hpp>
 #endif
@@ -43,11 +44,14 @@ struct GaussPoint {
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     Eigen::Vector3d pt;
     Eigen::Matrix3d cov;
+    double intensity = std::numeric_limits<double>::quiet_NaN();  // raw sensor value; NaN means unavailable
     GaussPoint() {
         pt = Eigen::Vector3d::Zero();
         cov = Eigen::Matrix3d::Zero();
     }
-    GaussPoint(const Eigen::Vector3d& p, const Eigen::Matrix3d& v) : pt(p), cov(v) {}
+    GaussPoint(const Eigen::Vector3d& p, const Eigen::Matrix3d& v,
+               double raw_intensity = std::numeric_limits<double>::quiet_NaN())
+        : pt(p), cov(v), intensity(raw_intensity) {}
 };
 using GaussCloud = std::vector<GaussPoint, Eigen::aligned_allocator<GaussPoint>>;
 using GaussCloudPtr = std::shared_ptr<GaussCloud>;
@@ -73,7 +77,10 @@ inline void GaussCloudToPclCloud(const GaussCloud& cloud_gauss, CloudPtr& cloud_
     cloud_pcl->clear();
     const size_t N = cloud_gauss.size();
     cloud_pcl->resize(N);
-    for (size_t i = 0; i < N; ++i) { cloud_pcl->points[i].getVector3fMap() = cloud_gauss[i].pt.cast<float>(); }
+    for (size_t i = 0; i < N; ++i) {
+        cloud_pcl->points[i].getVector3fMap() = cloud_gauss[i].pt.cast<float>();
+        cloud_pcl->points[i].intensity = static_cast<float>(cloud_gauss[i].intensity);
+    }
 }
 
 using CloudVec = std::vector<Eigen::Vector3f>;

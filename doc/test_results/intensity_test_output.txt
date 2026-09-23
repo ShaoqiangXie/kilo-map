@@ -1,0 +1,101 @@
+Start testing: Sep 20 01:36 CST
+----------------------------------------------------------
+1/4 Testing: intensity_model
+1/4 Test: intensity_model
+Command: "/home/x/workspace/austin_code/kilo_map_ws/build/legkilo/test/test_intensity" "model"
+Directory: /home/x/workspace/austin_code/kilo_map_ws/build/legkilo/test
+"intensity_model" start time: Sep 20 01:36 CST
+Output:
+----------------------------------------------------------
+PASS model (0.001824771 s)
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"intensity_model" end time: Sep 20 01:36 CST
+"intensity_model" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/4 Testing: intensity_jacobian
+2/4 Test: intensity_jacobian
+Command: "/home/x/workspace/austin_code/kilo_map_ws/build/legkilo/test/test_intensity" "jacobian"
+Directory: /home/x/workspace/austin_code/kilo_map_ws/build/legkilo/test
+"intensity_jacobian" start time: Sep 20 01:36 CST
+Output:
+----------------------------------------------------------
+jacobian_max_error=5.843094897e-10
+PASS jacobian (0.000581954 s)
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"intensity_jacobian" end time: Sep 20 01:36 CST
+"intensity_jacobian" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/4 Testing: intensity_registration
+3/4 Test: intensity_registration
+Command: "/home/x/workspace/austin_code/kilo_map_ws/build/legkilo/test/test_intensity" "registration"
+Directory: /home/x/workspace/austin_code/kilo_map_ws/build/legkilo/test
+"intensity_registration" start time: Sep 20 01:36 CST
+Output:
+----------------------------------------------------------
+scenario,translation_error_m,rotation_error_deg,min_information_eigenvalue,intensity_rows
+geometry_only,0.1,1.432394488,-9.41016602e-22,0
+geometry_intensity,0.000165546039,0.00257472249,2972.064286,784
+flat_intensity_off,0.1,1.432394488,-9.41016602e-22,0
+flat_intensity_on,0.1,1.432394488,-9.41016602e-22,0
+one_gradient_direction,0.06000004125,0.001758941027,-1.029558653e-18,784
+noise_seed_0,0.001384529975,0.001098586486,2972.123683,784
+noise_seed_1,0.002212913729,0.04943650901,2971.162917,784
+noise_seed_2,0.0007627218914,0.04228227857,2971.354211,784
+noise_seed_3,0.001343391182,0.006223090701,2972.21205,784
+noise_seed_4,0.002317443528,0.02276799349,2972.480004,784
+noise_seed_5,0.001893649739,0.01001929262,2972.265353,784
+noise_seed_6,0.001055346886,0.02466699671,2971.699077,784
+noise_seed_7,0.003107891781,0.02264828037,2971.684437,784
+noise_seed_8,0.002563110178,0.07140348398,2971.02208,784
+noise_seed_9,0.001735794116,0.02547306138,2972.364056,784
+noisy_translation_mean_m=0.0018376793, max_m=0.003107891781
+PASS registration (0.021771873 s)
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"intensity_registration" end time: Sep 20 01:36 CST
+"intensity_registration" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/4 Testing: intensity_frontend
+4/4 Test: intensity_frontend
+Command: "/home/x/workspace/austin_code/kilo_map_ws/build/legkilo/test/test_intensity" "frontend"
+Directory: /home/x/workspace/austin_code/kilo_map_ws/build/legkilo/test
+"intensity_frontend" start time: Sep 20 01:36 CST
+Output:
+----------------------------------------------------------
+frontend two_step=0 enabled=0 flat=0 ndt_only=0 intensity_rows=0
+frontend two_step=0 enabled=0 flat=0 ndt_only=1 intensity_rows=0
+frontend two_step=0 enabled=0 flat=1 ndt_only=0 intensity_rows=0
+frontend two_step=0 enabled=0 flat=1 ndt_only=1 intensity_rows=0
+frontend two_step=0 enabled=1 flat=0 ndt_only=0 intensity_rows=1323
+frontend two_step=0 enabled=1 flat=0 ndt_only=1 intensity_rows=1323
+frontend two_step=0 enabled=1 flat=1 ndt_only=0 intensity_rows=0
+frontend two_step=0 enabled=1 flat=1 ndt_only=1 intensity_rows=0
+frontend two_step=1 enabled=0 flat=0 ndt_only=0 intensity_rows=0
+frontend two_step=1 enabled=0 flat=0 ndt_only=1 intensity_rows=0
+frontend two_step=1 enabled=0 flat=1 ndt_only=0 intensity_rows=0
+frontend two_step=1 enabled=0 flat=1 ndt_only=1 intensity_rows=0
+frontend two_step=1 enabled=1 flat=0 ndt_only=0 intensity_rows=1323
+frontend two_step=1 enabled=1 flat=0 ndt_only=1 intensity_rows=1323
+frontend two_step=1 enabled=1 flat=1 ndt_only=0 intensity_rows=0
+frontend two_step=1 enabled=1 flat=1 ndt_only=1 intensity_rows=0
+PASS frontend (0.043233937 s)
+<end of output>
+Test time =   0.05 sec
+----------------------------------------------------------
+Test Passed.
+"intensity_frontend" end time: Sep 20 01:36 CST
+"intensity_frontend" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Sep 20 01:36 CST
