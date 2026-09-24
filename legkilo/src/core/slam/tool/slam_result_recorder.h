@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include <glog/logging.h>
 #include <boost/filesystem.hpp>
 
 #include "common/file_io.hpp"
@@ -57,10 +58,13 @@ class SLAMResultRecorder {
         next_frame_id_ = 0;
 
         writeEmptyFiles();
+        resetTumFiles();
 
         if (!config_file.empty() && fs::exists(config_file)) {
             fs::copy_file(config_file, configSnapshotPath(), fs::copy_option::overwrite_if_exists);
         }
+
+        LOG(INFO) << "TUM trajectories: " << frontendTumPath() << " , " << backendTumPath();
     }
 
     static void recordFrontendFrame(double timestamp, int64_t submap_id, const Eigen::Isometry3d& pose,
@@ -72,6 +76,7 @@ class SLAMResultRecorder {
         frame.is_keyframe = is_keyframe;
         frame.pose = pose;
         frames_.push_back(frame);
+        appendFrontendTum(frame);
     }
 
     static void updateSubmap(int64_t submap_id, const std::string& pcd_path, const Eigen::Isometry3d& frontend_origin,
@@ -96,6 +101,9 @@ class SLAMResultRecorder {
         writeFrontendFrames();
         writeSubmaps();
         writeLoopEdges();
+        if (frontend_tum_ofs_.is_open()) frontend_tum_ofs_.close();
+        writeFrontendTum();
+        writeBackendTum();
     }
 
     // Keep the lightweight backend files visible to external visualization nodes while SLAM is running.
@@ -103,6 +111,7 @@ class SLAMResultRecorder {
         if (work_dir_.empty()) return;
         writeSubmaps();
         writeLoopEdges();
+        writeBackendTum();
     }
 
    private:
@@ -167,6 +176,51 @@ class SLAMResultRecorder {
         }
     }
 
+    // TUM: timestamp tx ty tz qx qy qz qw. Pose is IMU/body in the world frame.
+    static void writeTumLine(std::ofstream& ofs, double timestamp, const Eigen::Isometry3d& pose) {
+        const Eigen::Quaterniond q(pose.rotation());
+        ofs << std::fixed << std::setprecision(9) << timestamp << " " << pose.translation().x() << " "
+            << pose.translation().y() << " " << pose.translation().z() << " " << q.x() << " " << q.y() << " " << q.z()
+            << " " << q.w() << "\n";
+    }
+
+    static void resetTumFiles() {
+        if (frontend_tum_ofs_.is_open()) frontend_tum_ofs_.close();
+        {
+            std::ofstream ofs(frontendTumPath(), std::ios::out | std::ios::trunc);
+        }
+        {
+            std::ofstream ofs(backendTumPath(), std::ios::out | std::ios::trunc);
+        }
+        frontend_tum_ofs_.open(frontendTumPath(), std::ios::out | std::ios::app);
+    }
+
+    static void appendFrontendTum(const FrameRecord& frame) {
+        if (!frontend_tum_ofs_.is_open()) return;
+        writeTumLine(frontend_tum_ofs_, frame.timestamp, frame.pose);
+        frontend_tum_ofs_.flush();
+    }
+
+    static void writeFrontendTum() {
+        std::ofstream ofs(frontendTumPath(), std::ios::out | std::ios::trunc);
+        if (!ofs.is_open()) return;
+        for (const auto& frame : frames_) { writeTumLine(ofs, frame.timestamp, frame.pose); }
+    }
+
+    // Backend pose uses the same submap correction as SLAMResultSaver::buildBackendTrajectory().
+    static void writeBackendTum() {
+        std::ofstream ofs(backendTumPath(), std::ios::out | std::ios::trunc);
+        if (!ofs.is_open()) return;
+        for (const auto& frame : frames_) {
+            const auto it = submaps_.find(frame.submap_id);
+            if (it == submaps_.end()) continue;
+            const auto& submap = it->second;
+            const Eigen::Isometry3d relative_pose = submap.frontend_origin.inverse() * frame.pose;
+            const Eigen::Isometry3d pose_backend = submap.backend_origin * relative_pose;
+            writeTumLine(ofs, frame.timestamp, pose_backend);
+        }
+    }
+
     static void writePose(std::ofstream& ofs, const Eigen::Isometry3d& pose) {
         const Eigen::Quaterniond q(pose.rotation());
         ofs << "," << std::fixed << std::setprecision(9) << pose.translation().x() << "," << pose.translation().y()
@@ -181,6 +235,10 @@ class SLAMResultRecorder {
 
     static std::string loopEdgesPath() { return joinPath(work_dir_, "loop_edges.csv"); }
 
+    static std::string frontendTumPath() { return joinPath(work_dir_, "frontend_imu.tum"); }
+
+    static std::string backendTumPath() { return joinPath(work_dir_, "backend_imu.tum"); }
+
     static std::string joinPath(const std::string& dir, const std::string& name) {
         if (dir.empty()) return name;
         if (dir.back() == '/') return dir + name;
@@ -188,6 +246,7 @@ class SLAMResultRecorder {
     }
 
     inline static std::string work_dir_;
+    inline static std::ofstream frontend_tum_ofs_;
     inline static uint64_t next_frame_id_ = 0;
     inline static std::vector<FrameRecord> frames_;
     inline static std::map<int64_t, SubmapRecord> submaps_;
