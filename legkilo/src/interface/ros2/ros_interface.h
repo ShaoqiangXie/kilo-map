@@ -103,6 +103,8 @@ class RosInterface {
     double last_timestamp_imu_ = 0.0;
     double last_timestamp_kin_imu_ = 0.0;
     double lidar_end_time_ = 0.0;
+    // Fusion timestamp convention: corrected_imu_time = raw_imu_time + imu_time_offset_.
+    double imu_time_offset_ = 0.0;
 
     ros_compat::PathMsg path_world_;
 

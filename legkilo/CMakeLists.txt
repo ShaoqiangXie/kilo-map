@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(legkilo)
 
 set(CMAKE_BUILD_TYPE "Release") 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(LEGKILO_BUILD_TESTS "Build test utilities under legkilo/test" OFF)
 option(IRIDESCENCE_VIEWER "Build Iridescence viewer" ON)
@@ -33,6 +34,25 @@ find_package(yaml-cpp REQUIRED)
 find_package(Glog REQUIRED)
 find_package(Boost REQUIRED COMPONENTS filesystem system)
 find_package(Ceres REQUIRED)
+
+# Colorful Terminal is a header-only dependency.  Prefer an explicitly supplied
+# path, then the sibling checkout used by this workspace, and finally a system
+# installation made by colorful_terminal/install.sh.
+set(COLORFUL_TERMINAL_ROOT "" CACHE PATH "Path containing colorful_terminal.hpp")
+find_path(COLORFUL_TERMINAL_INCLUDE_DIR
+    NAMES colorful_terminal.hpp
+    HINTS
+    ${COLORFUL_TERMINAL_ROOT}
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../../../colorful_terminal"
+    PATHS
+    /usr/include/colorful_terminal
+    /usr/local/include/colorful_terminal
+)
+if(NOT COLORFUL_TERMINAL_INCLUDE_DIR)
+  message(FATAL_ERROR
+      "Colorful Terminal was not found. Set COLORFUL_TERMINAL_ROOT to the directory containing colorful_terminal.hpp")
+endif()
+message(STATUS "Colorful Terminal include dir: ${COLORFUL_TERMINAL_INCLUDE_DIR}")
 
 # for ubuntu 18.04, please update gcc/g++ to 9, and then unzip oneapi-tbb-2022.2.0-lin in thirdparty folder,
 # then check TBB2018_INCLUDE_DIR is correct and set UBUNTU1804_TBB "ON"
@@ -140,6 +160,7 @@ endif()
 
 add_library(${PROJECT_NAME}.lib ${CORE_SOURCES} ${ROS_INTERFACE_SOURCES})
 target_compile_definitions(${PROJECT_NAME}.lib PUBLIC LEGKILO_ROS_VERSION=${LEGKILO_RESOLVED_ROS_VERSION})
+target_include_directories(${PROJECT_NAME}.lib PRIVATE ${COLORFUL_TERMINAL_INCLUDE_DIR})
 target_link_libraries(${PROJECT_NAME}.lib
     PUBLIC
     ${PCL_COMMON_LIBRARIES}

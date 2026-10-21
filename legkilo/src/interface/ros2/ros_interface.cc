@@ -1,7 +1,9 @@
 #include "interface/ros2/ros_interface.h"
 
+#include <cmath>
 #include <functional>
 #include <iomanip>
+#include <stdexcept>
 #include <utility>
 
 #include "common/timer_utils.hpp"
@@ -55,6 +57,13 @@ bool RosInterface::initParamAndReset(const std::string& config_file) {
     options::kRedundancy = yaml_helper.get<bool>("redundancy", false);
     if (options::useImu()) { options::kImuTopic = yaml_helper.get<std::string>("imu_topic"); }
     if (options::useKinematics()) { options::kKinematicTopic = yaml_helper.get<std::string>("kinematic_topic"); }
+
+    imu_time_offset_ =
+        yaml_helper.hasKey("imu_time_offset") ? yaml_helper.get<double>("imu_time_offset") : 0.0;
+    if (!std::isfinite(imu_time_offset_)) {
+        throw std::invalid_argument("imu_time_offset must be a finite value in seconds");
+    }
+    LOG(INFO) << "IMU timestamp correction: corrected_imu_time = raw_imu_time + " << imu_time_offset_ << " s";
 
     kilo_ = std::make_unique<KILO>(config_file);
 
@@ -287,6 +296,9 @@ void RosInterface::imuCallBack(ros_compat::ImuMsgConstPtr msg) {
     static ros_compat::ImuMsg last_imu_msg;
     ros_compat::ImuMsgPtr imu_msg(new ros_compat::ImuMsg(*msg));
 
+    const double timestamp = ros_compat::toSec(imu_msg->header.stamp) + imu_time_offset_;
+    imu_msg->header.stamp = ros_compat::fromSec(timestamp);
+
     if (options::kRedundancy) {
         if (imu_msg->linear_acceleration.z == last_imu_msg.linear_acceleration.z &&
             imu_msg->angular_velocity.z == last_imu_msg.angular_velocity.z) {
@@ -295,7 +307,6 @@ void RosInterface::imuCallBack(ros_compat::ImuMsgConstPtr msg) {
         }
     }
 
-    const double timestamp = ros_compat::toSec(imu_msg->header.stamp);
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (timestamp < last_timestamp_imu_) {
@@ -321,7 +332,7 @@ void RosInterface::kinematicImuCallBack(ros_compat::HighStateMsgConstPtr msg) {
         }
     }
 
-    const double timestamp = ros_compat::toSec(highstate_msg->stamp);
+    const double timestamp = ros_compat::toSec(highstate_msg->stamp) + imu_time_offset_;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (timestamp < last_timestamp_kin_imu_) {
@@ -331,6 +342,7 @@ void RosInterface::kinematicImuCallBack(ros_compat::HighStateMsgConstPtr msg) {
 
         common::KinImuMeas kin_imu_meas;
         kinematics_->processing(*highstate_msg, kin_imu_meas);
+        kin_imu_meas.time_stamp_ = timestamp;
         kin_imu_cache_.push_back(kin_imu_meas);
         last_timestamp_kin_imu_ = timestamp;
         last_highstate_msg = *highstate_msg;

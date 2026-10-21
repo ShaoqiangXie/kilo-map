@@ -102,6 +102,8 @@ class RosInterface {
     double last_timestamp_imu_;
     double last_timestamp_kin_imu_;
     double lidar_end_time_;
+    // Fusion timestamp convention: corrected_imu_time = raw_imu_time + imu_time_offset_.
+    double imu_time_offset_ = 0.0;
 
     // initialization
     bool init_flag_ = true;

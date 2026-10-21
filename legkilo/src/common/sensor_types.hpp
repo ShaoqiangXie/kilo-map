@@ -28,11 +28,11 @@ struct LidarScan {
 // leg order: FR FL RR RL
 struct KinImuMeas {
     double time_stamp_;
-    double foot_pos_[4][3];
-    double foot_vel_[4][3];
-    bool contact_[4];
-    double acc_[3];
-    double gyr_[3];
+    double foot_pos_[4][3];//// 四只脚的位置，每只脚为 [x, y, z]
+    double foot_vel_[4][3];//// 四只脚的速度，每只脚为 [vx, vy, vz]
+    bool contact_[4];// 每只脚是否接触地面
+    double acc_[3];// IMU 加速度计数据 [ax, ay, az]
+    double gyr_[3];// IMU 陀螺仪数据 [gx, gy, gz]
 };
 
 struct MeasGroup {
