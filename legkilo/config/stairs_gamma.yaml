@@ -49,7 +49,7 @@ kf_max_dist_submap: 5.0
 
 # Loop closure
 loop_closure_enable: true
-loop_search_radius: 10.0
+loop_search_radius: 12.0
 loop_min_id_separation: 50
 loop_icp_max_corr_dist: 4.0
 loop_icp_max_iterations: 20
