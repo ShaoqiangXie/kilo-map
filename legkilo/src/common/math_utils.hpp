@@ -143,6 +143,7 @@ inline int64_t encodeKey(const Eigen::Vector3i &key) {
     assert(key[0] >= -VOXEL_BIAS && key[0] < VOXEL_BIAS);
     assert(key[1] >= -VOXEL_BIAS && key[1] < VOXEL_BIAS);
     assert(key[2] >= -VOXEL_BIAS && key[2] < VOXEL_BIAS);
+    // 合法输入经过 & 不会改变；只有越界输入才可能改变。
     return (static_cast<int64_t>(key[0] + VOXEL_BIAS) & 0x1FFFFFll) |
            ((static_cast<int64_t>(key[1] + VOXEL_BIAS) & 0x1FFFFFll) << 21) |
            ((static_cast<int64_t>(key[2] + VOXEL_BIAS) & 0x1FFFFFll) << 42);

@@ -66,17 +66,18 @@ class VoxelGrid {
    private:
     void buildEntries(const CloudPtr& cloud_in, std::vector<std::pair<KeyType, size_t>>& entries) const {
         const size_t N = cloud_in->points.size();
-        entries.resize(N);
+        entries.resize(N);//为每个点创建一个存储体素键和点索引的pair
 
         const double inv_res = static_cast<double>(resolution_inv_);
+        //将所有的数据拆分成多个块，每个块最多1024个点，使用tbb::parallel_for并行处理每个块 每个块是r
         tbb::parallel_for(tbb::blocked_range<size_t>(0, N, 1024), [&](const tbb::blocked_range<size_t>& r) {
             for (size_t i = r.begin(); i < r.end(); ++i) {
                 const auto& pt = cloud_in->points[i];
                 Eigen::Vector3d p(static_cast<double>(pt.x), static_cast<double>(pt.y), static_cast<double>(pt.z));
-                const Eigen::Vector3i key_i = voxelKeyFastFloor(p, inv_res);
-                const KeyType code = encodeKey(key_i);
+                const Eigen::Vector3i key_i = voxelKeyFastFloor(p, inv_res);//计算点的体素键
+                const KeyType code = encodeKey(key_i);//三维整数坐标 key = (x, y, z)，打包成一个 64 位整数，方便用作体素（voxel）的唯一编号或哈希表的键。
                 entries[i].first = code;
-                entries[i].second = i;
+                entries[i].second = i;//原始点云的索引
             }
         });
 
@@ -99,13 +100,13 @@ class VoxelGrid {
             start = end;
         }
     }
-
+    //每个体素内保留一个点，具体保留的点的选择方式由采样模式决定 buildEntries()
     void filterMedian(const CloudPtr& cloud_in, CloudPtr& cloud_out) const {
         cloud_out.reset(new PointCloudType());
         if (!cloud_in || cloud_in->empty()) return;
-
+        // 构建并排列 (体素键（点属于体素的编号）, 原始点在点云队列的索引)，使同一体素的点连续存放。
         std::vector<std::pair<KeyType, size_t>> entries;
-        buildEntries(cloud_in, entries);
+        buildEntries(cloud_in, entries);//为每一个点计算体素键，并将体素键和点的索引存储在entries中，然后对entries按体素键进行排序，使得同一体素的点连续存放。
         std::vector<std::pair<size_t, size_t>> groups;
         computeGroups(entries, groups);
 
