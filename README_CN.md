@@ -108,7 +108,9 @@ ros2 bag play ./slope_ros2
   <img src="./doc/fig/tiled.png" alt="Image 1" width="48%" />
 </p>
 
-运行结束后，可通过可视化界面左上角的 **`Save Result`** 按钮保存全局地图与轨迹。
+完成建图后，可通过可视化界面的 **File → Save Result** 菜单停止 SLAM 并保存全局地图与轨迹。
+
+地图构建、子地图管理、分块规则和导出文件说明见 [地图管理方法](doc/map_management.md)。
 
 # Related Publications
 
